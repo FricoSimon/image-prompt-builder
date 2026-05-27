@@ -221,7 +221,9 @@ function createBlankForm(subjects = defaults.subjects): PromptForm {
   }
 }
 
-const keywordCategories: KeywordCategory[] = [
+const keywordLibraryStorageKey = "prompt-composer.keyword-library.v1"
+
+const defaultKeywordCategories: KeywordCategory[] = [
   {
     id: "style",
     kind: "field",
@@ -511,6 +513,57 @@ const keywordCategories: KeywordCategory[] = [
   },
 ]
 
+function normalizeKeywords(keywords: string[]) {
+  return Array.from(
+    new Set(
+      keywords
+        .map((keyword) => keyword.trim())
+        .filter(Boolean)
+        .map((keyword) => keyword.replace(/\s+/g, " "))
+    )
+  )
+}
+
+function serializeKeywordCategories(categories: KeywordCategory[]) {
+  return Object.fromEntries(
+    categories.map((category) => [category.id, category.keywords])
+  )
+}
+
+function saveKeywordCategories(categories: KeywordCategory[]) {
+  window.localStorage.setItem(
+    keywordLibraryStorageKey,
+    JSON.stringify(serializeKeywordCategories(categories))
+  )
+}
+
+function loadKeywordCategories() {
+  if (typeof window === "undefined") {
+    return defaultKeywordCategories
+  }
+
+  try {
+    const storedValue = window.localStorage.getItem(keywordLibraryStorageKey)
+
+    if (!storedValue) {
+      return defaultKeywordCategories
+    }
+
+    const storedKeywords = JSON.parse(storedValue) as Record<string, string[]>
+
+    return defaultKeywordCategories.map((category) => ({
+      ...category,
+      keywords: normalizeKeywords(
+        Array.isArray(storedKeywords[category.id])
+          ? storedKeywords[category.id]
+          : category.keywords
+      ),
+    }))
+  } catch {
+    return defaultKeywordCategories
+  }
+}
+
 function splitList(value: string) {
   return value
     .split(/[;,]/)
@@ -688,6 +741,9 @@ function App() {
   const [activeView, setActiveView] = useState<AppView>("composer")
   const [activeLibraryTarget, setActiveLibraryTarget] =
     useState<LibraryTarget | null>(null)
+  const [keywordCategories, setKeywordCategories] = useState(
+    loadKeywordCategories
+  )
 
   const draftConfig = useMemo(() => toStructuredPrompt(form), [form])
   const outputConfig = useMemo(() => toStructuredPrompt(submitted), [submitted])
@@ -713,6 +769,53 @@ function App() {
     }
 
     setActiveView("library")
+  }
+
+  function updateKeywordCategories(
+    updater: (current: KeywordCategory[]) => KeywordCategory[]
+  ) {
+    setKeywordCategories((current) => {
+      const next = updater(current)
+      saveKeywordCategories(next)
+
+      return next
+    })
+  }
+
+  function addKeyword(categoryId: string, keyword: string) {
+    const nextKeyword = keyword.trim().replace(/\s+/g, " ")
+
+    if (!nextKeyword) {
+      return
+    }
+
+    updateKeywordCategories((current) =>
+      current.map((category) =>
+        category.id === categoryId
+          ? {
+              ...category,
+              keywords: normalizeKeywords([...category.keywords, nextKeyword]),
+            }
+          : category
+      )
+    )
+  }
+
+  function removeKeyword(categoryId: string, keyword: string) {
+    updateKeywordCategories((current) =>
+      current.map((category) =>
+        category.id === categoryId
+          ? {
+              ...category,
+              keywords: category.keywords.filter((item) => item !== keyword),
+            }
+          : category
+      )
+    )
+  }
+
+  function resetKeywordLibrary() {
+    updateKeywordCategories(() => defaultKeywordCategories)
   }
 
   function applyKeyword(
@@ -1285,8 +1388,11 @@ function App() {
           <KeywordLibrary
             activeTarget={activeLibraryTarget}
             categories={keywordCategories}
+            onAddKeyword={addKeyword}
             onApplyKeyword={applyKeyword}
             onBack={() => setActiveView("composer")}
+            onRemoveKeyword={removeKeyword}
+            onResetLibrary={resetKeywordLibrary}
           />
         )}
       </div>
@@ -1297,18 +1403,25 @@ function App() {
 function KeywordLibrary({
   activeTarget,
   categories,
+  onAddKeyword,
   onApplyKeyword,
   onBack,
+  onRemoveKeyword,
+  onResetLibrary,
 }: {
   activeTarget: LibraryTarget | null
   categories: KeywordCategory[]
+  onAddKeyword: (categoryId: string, keyword: string) => void
   onApplyKeyword: (
     category: KeywordCategory,
     keyword: string,
     mode: KeywordMode
   ) => void
   onBack: () => void
+  onRemoveKeyword: (categoryId: string, keyword: string) => void
+  onResetLibrary: () => void
 }) {
+  const [draftKeywords, setDraftKeywords] = useState<Record<string, string>>({})
   const activeLabel = activeTarget
     ? activeTarget.kind === "subject"
       ? `${activeTarget.subjectLegend} / ${activeTarget.label.replace(
@@ -1325,13 +1438,20 @@ function KeywordLibrary({
           <CardTitle>Keyword Library</CardTitle>
           <CardDescription>
             Choose reusable phrases by prompt field. Insert replaces a value;
-            Add appears only where combined values make sense.
+            Add appears only where combined values make sense. Custom keywords
+            are saved in this browser.
           </CardDescription>
           <CardAction>
-            <Button type="button" variant="outline" onClick={onBack}>
-              <ArrowLeftIcon data-icon="inline-start" />
-              Composer
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" onClick={onResetLibrary}>
+                <RefreshCcwIcon data-icon="inline-start" />
+                Reset library
+              </Button>
+              <Button type="button" variant="outline" onClick={onBack}>
+                <ArrowLeftIcon data-icon="inline-start" />
+                Composer
+              </Button>
+            </div>
           </CardAction>
         </CardHeader>
         <CardContent>
@@ -1373,6 +1493,33 @@ function KeywordLibrary({
                 </CardAction>
               </CardHeader>
               <CardContent>
+                <form
+                  className="mb-3 flex flex-col gap-2 sm:flex-row"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    onAddKeyword(category.id, draftKeywords[category.id] ?? "")
+                    setDraftKeywords((current) => ({
+                      ...current,
+                      [category.id]: "",
+                    }))
+                  }}
+                >
+                  <Input
+                    aria-label={`New keyword for ${category.label}`}
+                    value={draftKeywords[category.id] ?? ""}
+                    placeholder={`Add ${category.label.toLowerCase()} keyword`}
+                    onChange={(event) =>
+                      setDraftKeywords((current) => ({
+                        ...current,
+                        [category.id]: event.target.value,
+                      }))
+                    }
+                  />
+                  <Button type="submit" variant="secondary">
+                    <PlusIcon data-icon="inline-start" />
+                    Save
+                  </Button>
+                </form>
                 <div className="grid gap-2">
                   {category.keywords.map((keyword) => (
                     <div
@@ -1404,6 +1551,22 @@ function KeywordLibrary({
                             Add
                           </Button>
                         )}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={`Remove ${keyword}`}
+                              onClick={() =>
+                                onRemoveKeyword(category.id, keyword)
+                              }
+                            >
+                              <Trash2Icon />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Remove keyword</TooltipContent>
+                        </Tooltip>
                       </div>
                     </div>
                   ))}

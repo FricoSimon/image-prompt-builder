@@ -1196,7 +1196,7 @@ function App() {
             </Button>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button type="button" onClick={copyPrompt}>
+                <Button type="button" className="w-32" onClick={copyPrompt}>
                   {copyState === "copied" ? (
                     <CheckIcon data-icon="inline-start" />
                   ) : (

@@ -8,6 +8,7 @@ import {
   InfoIcon,
   PlusIcon,
   RefreshCcwIcon,
+  ShuffleIcon,
   SparklesIcon,
   Trash2Icon,
   UserRoundIcon,
@@ -590,6 +591,42 @@ function withArticle(phrase: string) {
   return /^[aeiou]/i.test(trimmed) ? `an ${trimmed}` : `a ${trimmed}`
 }
 
+function withAnglePhrase(angle: string) {
+  const trimmed = angle.trim()
+
+  if (!trimmed) {
+    return "from the requested angle"
+  }
+
+  return /\bangle\b/i.test(trimmed)
+    ? `from ${withArticle(trimmed)}`
+    : `from ${withArticle(trimmed)} angle`
+}
+
+function withExpressionPhrase(expression: string) {
+  const trimmed = expression.trim()
+
+  if (!trimmed) {
+    return ""
+  }
+
+  return /\b(expression|smile)\b/i.test(trimmed)
+    ? `with ${withArticle(trimmed)}`
+    : `with ${withArticle(trimmed)} expression`
+}
+
+function withResolutionPhrase(resolution: string) {
+  const trimmed = resolution.trim()
+
+  if (!trimmed) {
+    return "at the requested resolution"
+  }
+
+  return /\bresolution\b/i.test(trimmed)
+    ? `at ${trimmed}`
+    : `at ${trimmed} resolution`
+}
+
 function listToSentence(items: string[]) {
   if (!items.length) {
     return ""
@@ -623,6 +660,66 @@ function appendKeywordValue(value: string, keyword: string, separator = ", ") {
   }
 
   return `${trimmed}${separator}${keyword}`
+}
+
+function findKeywordCategory(categories: KeywordCategory[], id: string) {
+  return categories.find((category) => category.id === id)
+}
+
+function getKeywordOptions(categories: KeywordCategory[], id: string) {
+  const currentKeywords = findKeywordCategory(categories, id)?.keywords ?? []
+  const defaultKeywords = findKeywordCategory(defaultKeywordCategories, id)
+    ?.keywords
+
+  return currentKeywords.length ? currentKeywords : (defaultKeywords ?? [])
+}
+
+function pickRandomItem(items: string[]) {
+  if (!items.length) {
+    return ""
+  }
+
+  return items[Math.floor(Math.random() * items.length)]
+}
+
+function pickRandomItems(items: string[], count: number) {
+  const availableItems = [...items]
+  const pickedItems: string[] = []
+
+  while (availableItems.length && pickedItems.length < count) {
+    const itemIndex = Math.floor(Math.random() * availableItems.length)
+    const [item] = availableItems.splice(itemIndex, 1)
+    pickedItems.push(item)
+  }
+
+  return pickedItems
+}
+
+function pickRandomKeywordList(
+  categories: KeywordCategory[],
+  id: string,
+  count: number,
+  separator = ", "
+) {
+  return pickRandomItems(getKeywordOptions(categories, id), count).join(
+    separator
+  )
+}
+
+function inferOrientationFromImageSize(imageSize: string) {
+  if (/square|1:1/i.test(imageSize)) {
+    return "square"
+  }
+
+  if (/portrait|vertical|4:5|9:16|2:3/i.test(imageSize)) {
+    return "portrait"
+  }
+
+  if (/landscape|widescreen|16:9|3:2/i.test(imageSize)) {
+    return "landscape"
+  }
+
+  return ""
 }
 
 function isCategoryActive(
@@ -710,7 +807,7 @@ function buildNaturalPrompt(config: StructuredPrompt) {
           const details = [
             subject.pose,
             subject.prop,
-            `with a ${subject.expression} expression`,
+            withExpressionPhrase(subject.expression),
           ].filter(Boolean)
 
           return `${subject.identity} is ${details.join(", ")}.`
@@ -720,8 +817,8 @@ function buildNaturalPrompt(config: StructuredPrompt) {
   const promptParts = [
     `Create ${withArticle(config.style)} ${subjectOverview} in ${withArticle(config.environment.location)}, with ${config.environment.background} as the background.`,
     subjectDetails,
-    `Use ${config.orientation} orientation with a ${config.image_size} image size/aspect ratio at ${config.resolution} resolution.`,
-    `Frame the image as a ${config.camera_style.framing} from an ${config.camera_style.angle} angle, with the look of an ${config.camera_style.camera}. Use ${config.environment.lighting}.`,
+    `Use ${config.orientation} orientation with a ${config.image_size} image size/aspect ratio ${withResolutionPhrase(config.resolution)}.`,
+    `Frame the image as ${withArticle(config.camera_style.framing)} ${withAnglePhrase(config.camera_style.angle)}, with the look of ${withArticle(config.camera_style.camera)}. Use ${config.environment.lighting}.`,
     `The image should feel ${config.mood}, with ${config.color_grading}.${effects ? ` Include ${effects}.` : ""}`,
   ]
 
@@ -957,6 +1054,72 @@ function App() {
     setSubmitted(blankForm)
   }
 
+  function randomizeForm() {
+    const subjectsToRandomize = form.subjects.length
+      ? form.subjects
+      : defaults.subjects
+    const randomImageSize = pickRandomItem(
+      getKeywordOptions(keywordCategories, "imageSize")
+    )
+    const randomOrientation =
+      inferOrientationFromImageSize(randomImageSize) ||
+      pickRandomItem(getKeywordOptions(keywordCategories, "orientation"))
+    const randomForm: PromptForm = {
+      style: pickRandomItem(getKeywordOptions(keywordCategories, "style")),
+      imageSize: randomImageSize,
+      orientation: randomOrientation,
+      resolution: pickRandomItem(
+        getKeywordOptions(keywordCategories, "resolution")
+      ),
+      camera: pickRandomItem(getKeywordOptions(keywordCategories, "camera")),
+      framing: pickRandomItem(getKeywordOptions(keywordCategories, "framing")),
+      angle: pickRandomItem(getKeywordOptions(keywordCategories, "angle")),
+      subjects: subjectsToRandomize.map((subject) => ({
+        id: subject.id,
+        identity: pickRandomItem(
+          getKeywordOptions(keywordCategories, "subjectIdentity")
+        ),
+        pose: pickRandomItem(
+          getKeywordOptions(keywordCategories, "subjectPose")
+        ),
+        expression: pickRandomKeywordList(
+          keywordCategories,
+          "subjectExpression",
+          2
+        ),
+        prop: pickRandomKeywordList(keywordCategories, "subjectProp", 1),
+      })),
+      location: pickRandomItem(getKeywordOptions(keywordCategories, "location")),
+      background: pickRandomItem(
+        getKeywordOptions(keywordCategories, "background")
+      ),
+      mood: pickRandomKeywordList(keywordCategories, "mood", 3),
+      lighting: pickRandomItem(getKeywordOptions(keywordCategories, "lighting")),
+      colorGrading: pickRandomItem(
+        getKeywordOptions(keywordCategories, "colorGrading")
+      ),
+      effects: pickRandomKeywordList(keywordCategories, "effects", 3),
+      identityConstraints: pickRandomKeywordList(
+        keywordCategories,
+        "identityConstraints",
+        3,
+        "; "
+      ),
+      negativeConstraints: pickRandomKeywordList(
+        keywordCategories,
+        "negativeConstraints",
+        4
+      ),
+    }
+
+    setForm(randomForm)
+    setSubmitted(randomForm)
+
+    if (activeView !== "composer") {
+      changeView("composer")
+    }
+  }
+
   async function copyPrompt() {
     try {
       await navigator.clipboard.writeText(naturalPrompt)
@@ -1026,6 +1189,10 @@ function App() {
             <Button type="button" variant="outline" onClick={resetForm}>
               <RefreshCcwIcon data-icon="inline-start" />
               Reset
+            </Button>
+            <Button type="button" variant="outline" onClick={randomizeForm}>
+              <ShuffleIcon data-icon="inline-start" />
+              Random
             </Button>
             <Tooltip>
               <TooltipTrigger asChild>

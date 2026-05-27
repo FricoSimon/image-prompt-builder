@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowLeftIcon,
   BookOpenIcon,
@@ -117,6 +117,8 @@ type PromptForm = typeof defaults
 type Subject = PromptForm["subjects"][number]
 
 type AppView = "composer" | "library"
+
+type ViewPhase = "idle" | "leaving" | "entering"
 
 type TextFieldKey = {
   [Key in keyof PromptForm]: PromptForm[Key] extends string ? Key : never
@@ -739,6 +741,9 @@ function App() {
   const [submitted, setSubmitted] = useState<PromptForm>(defaults)
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle")
   const [activeView, setActiveView] = useState<AppView>("composer")
+  const [renderedView, setRenderedView] = useState<AppView>("composer")
+  const [viewPhase, setViewPhase] = useState<ViewPhase>("idle")
+  const viewTimers = useRef<number[]>([])
   const [activeLibraryTarget, setActiveLibraryTarget] =
     useState<LibraryTarget | null>(null)
   const [keywordCategories, setKeywordCategories] = useState(
@@ -756,6 +761,12 @@ function App() {
     [outputConfig]
   )
 
+  useEffect(() => {
+    return () => {
+      viewTimers.current.forEach((timer) => window.clearTimeout(timer))
+    }
+  }, [])
+
   function updateField<K extends keyof PromptForm>(
     key: K,
     value: PromptForm[K]
@@ -763,12 +774,34 @@ function App() {
     setForm((current) => ({ ...current, [key]: value }))
   }
 
+  function changeView(nextView: AppView) {
+    if (nextView === activeView && viewPhase === "idle") {
+      return
+    }
+
+    viewTimers.current.forEach((timer) => window.clearTimeout(timer))
+    viewTimers.current = []
+
+    setActiveView(nextView)
+    setViewPhase("leaving")
+
+    viewTimers.current = [
+      window.setTimeout(() => {
+        setRenderedView(nextView)
+        setViewPhase("entering")
+      }, 120),
+      window.setTimeout(() => {
+        setViewPhase("idle")
+      }, 260),
+    ]
+  }
+
   function openLibrary(target?: LibraryTarget) {
     if (target) {
       setActiveLibraryTarget(target)
     }
 
-    setActiveView("library")
+    changeView("library")
   }
 
   function updateKeywordCategories(
@@ -977,7 +1010,7 @@ function App() {
             <Button
               type="button"
               variant={activeView === "composer" ? "default" : "outline"}
-              onClick={() => setActiveView("composer")}
+              onClick={() => changeView("composer")}
             >
               <SparklesIcon data-icon="inline-start" />
               Composer
@@ -1010,8 +1043,9 @@ function App() {
           </div>
         </header>
 
-        {activeView === "composer" ? (
-          <section className="grid gap-5 lg:grid-cols-[minmax(0,1.12fr)_minmax(420px,0.88fr)]">
+        <div className="view-transition" data-phase={viewPhase}>
+          {renderedView === "composer" ? (
+            <section className="grid gap-5 lg:grid-cols-[minmax(0,1.12fr)_minmax(420px,0.88fr)]">
             <Card className="bg-card/95 shadow-sm">
             <CardHeader>
               <CardTitle>Image Details</CardTitle>
@@ -1382,19 +1416,20 @@ function App() {
                 </TabsContent>
               </Tabs>
             </CardContent>
-            </Card>
-          </section>
-        ) : (
-          <KeywordLibrary
-            activeTarget={activeLibraryTarget}
-            categories={keywordCategories}
-            onAddKeyword={addKeyword}
-            onApplyKeyword={applyKeyword}
-            onBack={() => setActiveView("composer")}
-            onRemoveKeyword={removeKeyword}
-            onResetLibrary={resetKeywordLibrary}
-          />
-        )}
+              </Card>
+            </section>
+          ) : (
+            <KeywordLibrary
+              activeTarget={activeLibraryTarget}
+              categories={keywordCategories}
+              onAddKeyword={addKeyword}
+              onApplyKeyword={applyKeyword}
+              onBack={() => changeView("composer")}
+              onRemoveKeyword={removeKeyword}
+              onResetLibrary={resetKeywordLibrary}
+            />
+          )}
+        </div>
       </div>
     </main>
   )

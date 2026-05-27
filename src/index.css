@@ -123,6 +123,52 @@
       linear-gradient(135deg, var(--background) 0%, var(--secondary) 54%, var(--accent) 100%),
       var(--background);
   }
+
+  .view-transition {
+    transform-origin: top center;
+    will-change: opacity, transform;
+  }
+
+  .view-transition[data-phase="leaving"] {
+    animation: view-leave 120ms ease-in forwards;
+  }
+
+  .view-transition[data-phase="entering"] {
+    animation: view-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+
+@keyframes view-leave {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.995);
+  }
+}
+
+@keyframes view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.995);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view-transition,
+  .view-transition[data-phase="leaving"],
+  .view-transition[data-phase="entering"] {
+    animation: none;
+    transform: none;
+  }
 }
 
 @layer base {

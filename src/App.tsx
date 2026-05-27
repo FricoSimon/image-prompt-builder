@@ -65,13 +65,6 @@ const defaults = {
       expression: "natural, playful, candid",
       prop: "holding a burger",
     },
-    {
-      id: "subject-2",
-      identity: "boy from reference image",
-      pose: "relaxed, standing next to the girl",
-      expression: "natural, playful, candid",
-      prop: "holding a red Coca-Cola can",
-    },
   ],
   location: "indoor room",
   background: "plain white curtains",
@@ -152,6 +145,7 @@ type FieldKeywordCategory = {
   label: string
   description: string
   keywords: string[]
+  allowAppend?: boolean
   separator?: string
 }
 
@@ -162,6 +156,7 @@ type SubjectKeywordCategory = {
   label: string
   description: string
   keywords: string[]
+  allowAppend?: boolean
   separator?: string
 }
 
@@ -197,6 +192,33 @@ type StructuredPrompt = {
   mood: string
   identity_constraints: string[]
   negative_constraints: string[]
+}
+
+function createBlankForm(subjects = defaults.subjects): PromptForm {
+  return {
+    style: "",
+    imageSize: "",
+    orientation: "",
+    resolution: "",
+    camera: "",
+    framing: "",
+    angle: "",
+    subjects: subjects.map((subject) => ({
+      id: subject.id,
+      identity: "",
+      pose: "",
+      expression: "",
+      prop: "",
+    })),
+    location: "",
+    background: "",
+    mood: "",
+    lighting: "",
+    colorGrading: "",
+    effects: "",
+    identityConstraints: "",
+    negativeConstraints: "",
+  }
 }
 
 const keywordCategories: KeywordCategory[] = [
@@ -346,6 +368,7 @@ const keywordCategories: KeywordCategory[] = [
     field: "expression",
     label: "Subject expression",
     description: "Face or emotion",
+    allowAppend: true,
     keywords: [
       "natural, playful, candid",
       "soft smile",
@@ -361,6 +384,7 @@ const keywordCategories: KeywordCategory[] = [
     field: "prop",
     label: "Subject prop",
     description: "Held or used object",
+    allowAppend: true,
     keywords: [
       "holding a burger",
       "holding a red Coca-Cola can",
@@ -422,6 +446,7 @@ const keywordCategories: KeywordCategory[] = [
     field: "mood",
     label: "Mood",
     description: "Emotional tone",
+    allowAppend: true,
     keywords: [
       "cute",
       "nostalgic",
@@ -439,6 +464,7 @@ const keywordCategories: KeywordCategory[] = [
     field: "effects",
     label: "Visual effects",
     description: "Optical texture",
+    allowAppend: true,
     keywords: [
       "soft focus",
       "slight motion blur",
@@ -455,6 +481,7 @@ const keywordCategories: KeywordCategory[] = [
     field: "identityConstraints",
     label: "Identity constraints",
     description: "Reference preservation",
+    allowAppend: true,
     separator: "; ",
     keywords: [
       "preserve facial features from the reference",
@@ -471,6 +498,7 @@ const keywordCategories: KeywordCategory[] = [
     field: "negativeConstraints",
     label: "Negative constraints",
     description: "Avoid list",
+    allowAppend: true,
     keywords: [
       "no text",
       "no watermark",
@@ -517,6 +545,10 @@ function listToSentence(items: string[]) {
   }
 
   return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`
 }
 
 function appendKeywordValue(value: string, keyword: string, separator = ", ") {
@@ -582,6 +614,34 @@ function toStructuredPrompt(form: PromptForm): StructuredPrompt {
 }
 
 function buildNaturalPrompt(config: StructuredPrompt) {
+  const hasPromptContent =
+    [
+      config.style,
+      config.image_size,
+      config.orientation,
+      config.resolution,
+      config.color_grading,
+      config.camera_style.camera,
+      config.camera_style.framing,
+      config.camera_style.angle,
+      config.environment.location,
+      config.environment.background,
+      config.environment.lighting,
+      config.mood,
+      ...config.camera_style.effects,
+      ...config.identity_constraints,
+      ...config.negative_constraints,
+    ].some(Boolean) ||
+    config.subjects.some((subject) =>
+      [subject.identity, subject.pose, subject.expression, subject.prop].some(
+        Boolean
+      )
+    )
+
+  if (!hasPromptContent) {
+    return ""
+  }
+
   const effects = listToSentence(config.camera_style.effects)
   const identityRules = config.identity_constraints.join(". ")
   const negativeRules = config.negative_constraints.join(", ")
@@ -660,8 +720,9 @@ function App() {
     keyword: string,
     mode: KeywordMode
   ) {
+    const nextMode = category.allowAppend ? mode : "replace"
     const nextValue = (currentValue: string) =>
-      mode === "replace"
+      nextMode === "replace"
         ? keyword
         : appendKeywordValue(currentValue, keyword, category.separator)
 
@@ -752,8 +813,12 @@ function App() {
   }
 
   function resetForm() {
-    setForm(defaults)
-    setSubmitted(defaults)
+    const blankForm = createBlankForm(
+      form.subjects.length ? form.subjects : defaults.subjects
+    )
+
+    setForm(blankForm)
+    setSubmitted(blankForm)
   }
 
   async function copyPrompt() {
@@ -854,7 +919,7 @@ function App() {
               <CardAction>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline">
-                    {draftConfig.subjects.length} subjects
+                    {pluralize(draftConfig.subjects.length, "subject")}
                   </Badge>
                   <Badge variant="outline">
                     {draftConfig.camera_style.effects.length} effects
@@ -1194,7 +1259,7 @@ function App() {
                     <TabsTrigger value="json">JSON</TabsTrigger>
                   </TabsList>
                   <Badge variant="secondary">
-                    {outputConfig.subjects.length} subjects
+                    {pluralize(outputConfig.subjects.length, "subject")}
                   </Badge>
                 </div>
 
@@ -1259,8 +1324,8 @@ function KeywordLibrary({
         <CardHeader>
           <CardTitle>Keyword Library</CardTitle>
           <CardDescription>
-            Choose reusable phrases by prompt field, then insert or append them
-            into the composer.
+            Choose reusable phrases by prompt field. Insert replaces a value;
+            Add appears only where combined values make sense.
           </CardDescription>
           <CardAction>
             <Button type="button" variant="outline" onClick={onBack}>
@@ -1326,17 +1391,19 @@ function KeywordLibrary({
                         >
                           Insert
                         </Button>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() =>
-                            onApplyKeyword(category, keyword, "append")
-                          }
-                        >
-                          <PlusIcon data-icon="inline-start" />
-                          Add
-                        </Button>
+                        {category.allowAppend && (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() =>
+                              onApplyKeyword(category, keyword, "append")
+                            }
+                          >
+                            <PlusIcon data-icon="inline-start" />
+                            Add
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}
